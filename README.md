@@ -1,6 +1,6 @@
 # TensorFlow Embedding Visualization Demo #
 
-![](https://cloud.githubusercontent.com/assets/80381/20867532/97e01b94-ba8a-11e6-93f9-0c8fe0b76e00.png)
+![](screenshot.png)
 
 https://www.tensorflow.org/get_started/embedding_viz
 
