@@ -18,6 +18,9 @@ path_graph_def = "classify_image_graph_def.pb"
 # Directory to store the downloaded data.
 data_dir = "inception/"
 
+IMAGE_DIR = 'img'
+LOG_DIR = 'logs'
+
 
 def maybe_download():
     """
@@ -35,10 +38,6 @@ def load_graph():
 
     # Set the new graph as the default.
     with graph.as_default():
-        # TensorFlow graphs are saved to disk as so-called Protocol Buffers
-        # aka. proto-bufs which is a file-format that works on multiple
-        # platforms. In this case it is saved as a binary file.
-
         # Open the graph-def file for binary reading.
         path = os.path.join(data_dir, path_graph_def)
         with tf.gfile.FastGFile(path, 'rb') as file:
@@ -57,42 +56,58 @@ def load_graph():
 def main(argv=None):
     maybe_download()
     graph = load_graph()
+
     basedir = os.path.dirname(__file__)
+
+    # ensure log directory exists
+    logs_path = os.path.join(basedir, LOG_DIR)
+    if not os.path.exists(logs_path):
+        os.makedirs(logs_path)
+
     with tf.Session(graph=graph) as sess:
+
         pool3 = sess.graph.get_tensor_by_name('pool_3:0')
         jpeg_data = tf.placeholder(tf.string)
-        thumbnail = tf.cast(tf.image.resize_images(tf.image.decode_jpeg(jpeg_data, channels=3), [100, 100]), tf.uint8)
-        outputs = []
-        files = []
-        images = []
-        for filename in os.listdir('images'):
-            if not filename.endswith('.JPG'):
-                continue
-            print('process %s...' % filename)
-            files.append(filename)
-            with open(os.path.join(basedir, 'images', filename), 'rb') as f:
-                data = f.read()
-                results = sess.run([pool3, thumbnail], {'DecodeJpeg/contents:0': data, jpeg_data: data})
-                outputs.append(results[0])
-                images.append(results[1])
+        thumbnail = tf.cast(tf.image.resize_images(
+            tf.image.decode_jpeg(jpeg_data, channels=3), [100, 100]), tf.uint8)
 
-        embedding_var = tf.Variable(tf.stack([tf.squeeze(x) for x in outputs], axis=0), trainable=False, name='embed')
+        outputs = []
+        images = []
+
+        # Create metadata
+        metadata_path = os.path.join(basedir, LOG_DIR, 'metadata.tsv')
+        metadata = open(metadata_path, 'w')
+        metadata.write("Name\tLabels\n")
+
+        for folder_name in os.listdir(IMAGE_DIR):
+            for file_name in os.listdir(IMAGE_DIR + '/' + folder_name):
+                if not file_name.endswith('.jpg'):
+                    continue
+                print('process %s...' % file_name)
+
+                with open(os.path.join(basedir, IMAGE_DIR + '/' + folder_name, file_name), 'rb') as f:
+                    data = f.read()
+                    results = sess.run([pool3, thumbnail], {
+                        'DecodeJpeg/contents:0': data, jpeg_data: data})
+                    outputs.append(results[0])
+                    images.append(results[1])
+                    metadata.write('{}\t{}\n'.format(file_name, folder_name))
+        metadata.close()
+
+        embedding_var = tf.Variable(tf.stack(
+            [tf.squeeze(x) for x in outputs], axis=0), trainable=False, name='embed')
 
         # prepare projector config
         config = projector.ProjectorConfig()
         embedding = config.embeddings.add()
         embedding.tensor_name = embedding_var.name
-        summary_writer = tf.summary.FileWriter(os.path.join(basedir, 'logdir'))
+        summary_writer = tf.summary.FileWriter(os.path.join(basedir, LOG_DIR))
 
         # link metadata
-        metadata_path = os.path.join(basedir, 'logdir', 'metadata.tsv')
-        with open(metadata_path, 'w') as f:
-            for name in files:
-                f.write('%s\n' % name)
         embedding.metadata_path = metadata_path
 
         # write to sprite image file
-        image_path = os.path.join(basedir, 'logdir', 'sprite.jpg')
+        image_path = os.path.join(basedir, LOG_DIR, 'sprite.jpg')
         size = int(math.sqrt(len(images))) + 1
         while len(images) < size * size:
             images.append(np.zeros((100, 100, 3), dtype=np.uint8))
@@ -111,7 +126,7 @@ def main(argv=None):
         sess.run(tf.variables_initializer([embedding_var]))
 
         saver = tf.train.Saver()
-        saver.save(sess, os.path.join(basedir, 'logdir', 'model.ckpt'))
+        saver.save(sess, os.path.join(basedir, LOG_DIR, 'model.ckpt'))
 
 
 if __name__ == '__main__':
